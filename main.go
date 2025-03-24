@@ -23,6 +23,6 @@ func main() {
 	//fmt.Println("config.Database.Driver=",config.Database.Driver);
 	//加载路由
 	r := route.InitRouter()
-	r.Run(":9093")
+	r.Run(":8817")
 
 }

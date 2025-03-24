@@ -1,4 +1,4 @@
-package models
+package util
 
 import (
 	"gorm.io/driver/mysql"
@@ -14,11 +14,11 @@ var (
 
 var (
 	dbInstance *gorm.DB
-	once       sync.Once
+	onceCore   sync.Once
 )
 
 func DB() *gorm.DB {
-	once.Do(func() {
+	onceCore.Do(func() {
 		var err error
 		dbInstance, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 			NamingStrategy: schema.NamingStrategy{

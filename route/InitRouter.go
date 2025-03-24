@@ -2,7 +2,7 @@ package route
 
 import (
 	_ "bessGin/app/api/controller" //一定要导入这个Controller包，用来注册需要访问的方法
-	_ "bessGin/app/api/controller/v1"
+
 	"bessGin/route/middleware/jwt"
 	"github.com/gin-gonic/gin"
 	ginAutoRouter "github.com/xiaomo1989/gin-auto-router"
