@@ -82,6 +82,26 @@ func (r *RedisClient) Publish(channel string, message string) error {
 	return r.client.Publish(r.ctx, channel, message).Err()
 }
 
+// Subscribe 方法：订阅指定频道，并返回接收到的消息
+func (r *RedisClient) SubscribeReturn(channel string) <-chan string {
+	// 创建 Redis 订阅
+	sub := rdb.Subscribe(ctx, channel)
+	// 获取消息通道
+	ch := make(chan string)
+	// 在协程中监听消息
+	go func() {
+		defer close(ch)
+		defer sub.Close()
+		// 监听 Redis 频道消息
+		for msg := range sub.Channel() {
+			log.Printf("收到 Redis 消息: %s", msg.Payload)
+			ch <- msg.Payload // 将消息传递到外部
+		}
+	}()
+
+	return ch
+}
+
 // Subscribe 订阅消息
 func (r *RedisClient) Subscribe(channel string, handler func(msg string)) {
 	pubsub := r.client.Subscribe(r.ctx, channel)

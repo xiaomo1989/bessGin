@@ -4,6 +4,7 @@ import (
 	userService "bessGin/app/service"
 	"bessGin/util"
 	"encoding/json"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	ginAutoRouter "github.com/xiaomo1989/gin-auto-router"
 	"io"
@@ -44,7 +45,6 @@ func (api *User) Pages(c *gin.Context) {
 	if id != "" {
 		condMap["id"] = id
 	}
-
 	page := c.DefaultQuery("page", "1")
 	pageIndex, err := strconv.Atoi(page)
 	if err != nil {
@@ -67,7 +67,6 @@ func (api *User) Pages(c *gin.Context) {
 func (api *User) ListGet(c *gin.Context) {
 	userName := c.Query("name")
 	condMap := make(map[string]interface{})
-
 	if userName != "" {
 		condMap["name"] = userName
 	}
@@ -94,5 +93,45 @@ func (api *User) UserInfo(c *gin.Context) {
 		"code": 1,
 		"msg":  "ok",
 		"data": list,
+	})
+}
+
+// 发布消息
+func (api *User) UserInfo1(c *gin.Context) {
+	message := "Hello, Redis Pub/Sub!" // 示例消息
+	channel := "mychannel"             // 频道
+	// 获取 Redis 单例客户端
+	redisClient := util.GetRedis()
+	// 发布消息
+	err := redisClient.Publish(channel, message)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 1,
+			"msg":  "ok",
+			"data": err,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "ok",
+		"data": "success",
+	})
+}
+
+// 订阅
+func (api *User) Dingyue(c *gin.Context) {
+	channel := "mychannel" // 频道
+	// 获取 Redis 单例客户端
+	redisClient := util.GetRedis()
+	// 发布消息
+	subscribeReturn := redisClient.SubscribeReturn(channel)
+	// 监听并打印消息
+	for msg := range subscribeReturn {
+		fmt.Println("收到的消息:", msg)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code": 1,
+		"msg":  "ok",
+		"data": "success",
 	})
 }
