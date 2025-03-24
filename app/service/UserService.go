@@ -1,8 +1,8 @@
 package service
 
 import (
+	model "bessGin/app/models"
 	"fmt"
-	model "ginNew/app/models"
 	"strings"
 )
 

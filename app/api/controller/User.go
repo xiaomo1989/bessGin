@@ -1,9 +1,9 @@
 package controller
 
 import (
+	userService "bessGin/app/service"
+	"bessGin/util"
 	"encoding/json"
-	userService "ginNew/app/service"
-	"ginNew/util"
 	"github.com/gin-gonic/gin"
 	ginAutoRouter "github.com/xiaomo1989/gin-auto-router"
 	"io"
