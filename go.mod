@@ -7,6 +7,7 @@ require (
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.0
+	github.com/streadway/amqp v1.1.0
 	github.com/xiaomo1989/gin-auto-router v0.0.0-20250321023204-21904ea85e61
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/gorm v1.25.12
