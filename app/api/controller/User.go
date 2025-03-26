@@ -3,7 +3,7 @@ package controller
 import (
 	userService "bessGin/app/service"
 	"bessGin/util"
-	"bessGin/util/rabbitmq/consumer"
+	"bessGin/util/rabbitmq/fanout"
 	"encoding/json"
 	"github.com/gin-gonic/gin"
 	ginAutoRouter "github.com/xiaomo1989/gin-auto-router"
@@ -121,9 +121,9 @@ func (api *User) UserInfo1(c *gin.Context) {
 func (api *User) PushRabbit(c *gin.Context) {
 	message := c.PostForm("message")
 	// 初始化RabbitMQ连接
-	consumer.GetConnection()
+	fanout.GetConnection()
 	//发消息
-	err := consumer.Publish([]byte(message))
+	err := fanout.Publish([]byte(message))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to publish message"})
 	}

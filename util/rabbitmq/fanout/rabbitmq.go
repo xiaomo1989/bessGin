@@ -1,4 +1,4 @@
-package consumer
+package fanout
 
 import (
 	"fmt"
@@ -53,18 +53,4 @@ func getRabbitMQURL() string {
 		return url
 	}
 	return "amqp://guest:guest@localhost:5672/"
-}
-
-func Publish(message []byte) error {
-	return rabbitChannel.Publish(
-		ExchangeName,
-		"",    // routing key
-		false, // mandatory
-		false, // immediate
-		amqp.Publishing{
-			DeliveryMode: amqp.Persistent,
-			ContentType:  "text/plain",
-			Body:         message,
-		},
-	)
 }

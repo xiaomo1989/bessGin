@@ -8,12 +8,12 @@ import (
 	"syscall"
 	"time"
 
-	"bessGin/util/rabbitmq/consumer"
+	"bessGin/util/rabbitmq/fanout"
 )
 
 func main() {
 	// 初始化连接
-	consumer.GetConnection()
+	fanout.GetConnection()
 
 	// 启动初始消费者
 	startConsumers(1)
@@ -30,7 +30,7 @@ func main() {
 
 func startConsumers(num int) {
 	for i := 1; i <= num; i++ {
-		c := consumer.NewConsumer(fmt.Sprintf("Consumer-%d", i))
+		c := fanout.NewConsumer(fmt.Sprintf("Consumer-%d", i))
 		go c.Start()
 	}
 }
@@ -40,7 +40,7 @@ func autoScaling() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		log.Println("Adding new consumer...")
+		log.Println("Adding new fanout...")
 		startConsumers(1)
 	}
 }

@@ -45,14 +45,14 @@ func main() {
 	// 注册消费者
 	msgs, err := ch.Consume(
 		q.Name,     // queue
-		consumerID, // consumer
+		consumerID, // fanout
 		false,      // auto-ack
 		false,      // exclusive
 		false,      // no-local
 		false,      // no-wait
 		nil,        // args
 	)
-	failError1(err, "Failed to register a consumer")
+	failError1(err, "Failed to register a fanout")
 
 	log.Printf("Consumer %s started...", consumerID)
 
