@@ -9,8 +9,8 @@ import (
 
 const (
 	RabbitMQURL  = "amqp://guest:guest@192.168.35.13:5672/" // RabbitMQ 连接地址
-	ExchangeName = "exchange_demo_10"                       // 交换机名称
-	QueueName    = "queue_demo_16"                          // 队列名称
+	ExchangeName = "exchange_demo_yan"                      // 交换机名称
+	QueueName    = "queue_demo_yan"                         // 队列名称
 	RoutingKey   = "routing_demo"                           // 路由键
 )
 
@@ -83,7 +83,7 @@ func (r *RabbitMQ) connect() error {
 		return err
 	}
 
-	err = r.channel.QueueBind(QueueName, RoutingKey, ExchangeName, false, nil)
+	err = r.channel.QueueBind(QueueName, "", ExchangeName, false, nil)
 	if err != nil {
 		return err
 	}

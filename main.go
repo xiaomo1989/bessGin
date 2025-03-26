@@ -20,7 +20,7 @@ func main() {
 		return
 	}
 	fmt.Println("data_config:\t", string(data_config))
-	//fmt.Println("config.Database.Driver=",config.Database.Driver);
+
 	//加载路由
 	r := route.InitRouter()
 	r.Run(":8817")
