@@ -118,6 +118,7 @@ func (api *User) UserInfo1(c *gin.Context) {
 	})
 }
 
+// 生产消息
 func (api *User) PushRabbit(c *gin.Context) {
 	message := c.PostForm("message")
 	// 初始化RabbitMQ连接
