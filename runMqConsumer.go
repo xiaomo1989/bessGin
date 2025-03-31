@@ -1,47 +1,38 @@
 package main
 
 import (
+	"bessGin/util/rabbitmq/fanout"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-
-	"bessGin/util/rabbitmq/fanout"
 )
 
 func main() {
 	// 初始化连接
 	fanout.GetConnection()
-
-	// 启动初始消费者
-	startConsumers(1)
-
-	// 自动扩容逻辑
-	//go autoScaling()
-
+	// 启动消费者
+	go fanout.StartConsumer("CONSUMER-1")
+	// 管理动态扩展
+	//go autoScaleConsumers()
 	// 优雅关闭
 	handleShutdown()
-
 	// 保持主协程运行
 	select {}
 }
 
-func startConsumers(num int) {
-	for i := 1; i <= num; i++ {
-		c := fanout.NewConsumer(fmt.Sprintf("Consumer-%d", i))
-		go c.Start()
-	}
-}
-
-func autoScaling() {
+func autoScaleConsumers() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-
+	consumerCount := 2
 	for range ticker.C {
-		log.Println("Adding new fanout...")
-		startConsumers(1)
+		consumerCount++
+		log.Printf("Scaling out to %d consumers...", consumerCount)
+		go fanout.StartConsumer(
+			fmt.Sprintf("CONSUMER-%d", consumerCount),
+		)
 	}
 }
 
@@ -49,10 +40,13 @@ func handleShutdown() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		<-sigChan
-		log.Println("\nInitiating graceful shutdown...")
-		// 可以添加自定义清理逻辑
-		os.Exit(0)
-	}()
+	<-sigChan
+	log.Println("\nStarting graceful shutdown...")
+	if conn := fanout.GetConnection(); conn != nil {
+		if err := conn.Close(); err != nil {
+			log.Println("RabbitMQ close error:", err)
+		}
+	}
+	log.Println("Resources released. Exiting.")
+	os.Exit(0)
 }

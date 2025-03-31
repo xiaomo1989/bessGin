@@ -22,7 +22,7 @@ func DB() *gorm.DB {
 		var err error
 		dbInstance, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 			NamingStrategy: schema.NamingStrategy{
-				TablePrefix:   "tp_",
+				TablePrefix:   "",
 				SingularTable: true,
 			},
 		})

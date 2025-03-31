@@ -124,7 +124,7 @@ func (api *User) PushRabbit(c *gin.Context) {
 	// 初始化RabbitMQ连接
 	fanout.GetConnection()
 	//发消息
-	err := fanout.Publish([]byte(message))
+	err := fanout.PublishMessage(message)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to publish message"})
 	}
