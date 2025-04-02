@@ -20,7 +20,6 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
-	"testing"
 	"time"
 )
 
@@ -105,23 +104,6 @@ func (api *User) UserInfo(c *gin.Context) {
 		"code": 1,
 		"msg":  "ok",
 		"data": list,
-	})
-}
-
-func (api *User) TestGet(c *gin.Context) {
-	test(&testing.B{})
-}
-
-func test(b *testing.B) {
-	var demoMap map[string]string = map[string]string{
-		"a": "a",
-		"b": "b",
-	}
-	// 模拟并发写map
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			demoMap["a"] = "aa"
-		}
 	})
 }
 
