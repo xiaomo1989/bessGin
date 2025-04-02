@@ -1,8 +1,10 @@
 package acksixin
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"time"
 
@@ -16,18 +18,35 @@ var (
 )
 
 type ConnectionManager struct {
-	cfg        *config.RabbitMQConfig
+	config     *config.RabbitMQConfig
 	connNotify chan *amqp.Error
+	conn       *amqp.Connection
+	mu         sync.RWMutex
+	closed     bool
+}
+
+// NotifyClose 返回连接关闭通知通道
+func (cm *ConnectionManager) NotifyClose() <-chan *amqp.Error {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if cm.conn != nil {
+		return cm.conn.NotifyClose(make(chan *amqp.Error, 1))
+	}
+
+	ch := make(chan *amqp.Error, 1)
+	close(ch)
+	return ch
 }
 
 func NewConnectionManager(cfg *config.RabbitMQConfig) *ConnectionManager {
 	return &ConnectionManager{
-		cfg:        cfg,
+		config:     cfg,
 		connNotify: make(chan *amqp.Error, 1),
 	}
 }
 
-func (cm *ConnectionManager) GetConnection() (*amqp.Connection, error) {
+/*func (cm *ConnectionManager) GetConnection() (*amqp.Connection, error) {
 	connMutex.RLock()
 	if conn != nil && !conn.IsClosed() {
 		connMutex.RUnlock()
@@ -36,12 +55,43 @@ func (cm *ConnectionManager) GetConnection() (*amqp.Connection, error) {
 	connMutex.RUnlock()
 
 	return cm.connectWithRetry()
+}*/
+
+// 在 ConnectionManager 中添加重试机制
+func (cm *ConnectionManager) GetConnection() (*amqp.Connection, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if cm.closed {
+		return nil, errors.New("connection manager is closed")
+	}
+
+	// 如果连接有效则直接返回
+	if cm.conn != nil && !cm.conn.IsClosed() {
+		return cm.conn, nil
+	}
+
+	// 带指数退避的重试逻辑
+	var lastErr error
+	for i := 0; i < cm.config.MaxRetries; i++ {
+		conn, err := amqp.DialConfig(cm.config.URL, amqp.Config{
+			Heartbeat: cm.config.Heartbeat,
+			Dial:      amqp.DefaultDial(cm.config.ConnectTimeout),
+		})
+		if err == nil {
+			cm.conn = conn
+			return conn, nil
+		}
+		lastErr = err
+		time.Sleep(time.Second * time.Duration(math.Pow(2, float64(i))))
+	}
+	return nil, fmt.Errorf("after %d retries: %w", cm.config.MaxRetries, lastErr)
 }
 
 func (cm *ConnectionManager) connectWithRetry() (*amqp.Connection, error) {
 	var lastErr error
-	for i := 0; i < cm.cfg.MaxRetries; i++ {
-		c, err := amqp.DialConfig(cm.cfg.URL, amqp.Config{
+	for i := 0; i < cm.config.MaxRetries; i++ {
+		c, err := amqp.DialConfig(cm.config.URL, amqp.Config{
 			Heartbeat: 10 * time.Second,
 			Locale:    "en_US",
 		})
@@ -54,9 +104,9 @@ func (cm *ConnectionManager) connectWithRetry() (*amqp.Connection, error) {
 			return conn, nil
 		}
 		lastErr = err
-		time.Sleep(cm.cfg.ReconnectDelay)
+		time.Sleep(cm.config.ReconnectDelay)
 	}
-	return nil, fmt.Errorf("failed to connect after %d attempts: %v", cm.cfg.MaxRetries, lastErr)
+	return nil, fmt.Errorf("failed to connect after %d attempts: %v", cm.config.MaxRetries, lastErr)
 }
 
 // 完整基础设施声明

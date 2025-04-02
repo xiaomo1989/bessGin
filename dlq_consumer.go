@@ -5,24 +5,42 @@ import (
 	"bessGin/config"
 	"bessGin/util/rabbitmq/acksixin"
 	"context"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
-	"os/signal"
-	"syscall"
+	"time"
 )
 
 func main() {
+	/*config := &RabbitMQConfig{
+		URL:            "amqp://guest:guest@localhost:5672/",
+		DLXQueueName:   "dlx.orders",
+		DLXExchange:    "dlx_exchange",
+		PrefetchCount:  10,
+		MaxRetries:     5,
+		ReconnectDelay: 3 * time.Second,
+	}
+	*/
+	config := config.Load()
+	consumer := acksixin.NewDLXConsumer(config)
 
-	cfg := config.Load()
-	consumer := acksixin.NewDLXConsumer(cfg)
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	// 消息处理函数
+	handler := func(msg amqp.Delivery) error {
+		log.Printf("Received dead letter: %s", msg.Body)
+		// 这里添加业务逻辑
+		return nil
+	}
+
+	// 启动消费者
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		if err := consumer.Start(ctx); err != nil {
-			log.Fatalf("Consumer error: %v", err)
+		if err := consumer.Start(ctx, handler); err != nil {
+			log.Fatalf("Consumer failed: %v", err)
 		}
 	}()
 
-	<-ctx.Done()
+	// 模拟运行一段时间后关闭
+	time.Sleep(30 * time.Second)
+	cancel()
 	consumer.Shutdown()
-	log.Println("Shutdown completed")
+
 }

@@ -3,182 +3,251 @@ package acksixin
 import (
 	"bessGin/config"
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+// DLXConsumer 死信队列消费者
 type DLXConsumer struct {
-	config     *config.RabbitMQConfig
-	connection *amqp.Connection
-	channel    *amqp.Channel
-	done       chan struct{}
+	config      *config.RabbitMQConfig
+	connManager *ConnectionManager
+	channel     *amqp.Channel
+	done        chan struct{}
+	mu          sync.Mutex
+	wg          sync.WaitGroup
 }
 
+// RabbitMQConfig 配置结构
+type RabbitMQConfig struct {
+	URL            string
+	DLXQueueName   string
+	DLXExchange    string
+	PrefetchCount  int
+	MaxRetries     int
+	ReconnectDelay time.Duration
+}
+
+// NewDLXConsumer 创建新的消费者实例
 func NewDLXConsumer(config *config.RabbitMQConfig) *DLXConsumer {
 	return &DLXConsumer{
-		config: config,
-		done:   make(chan struct{}),
+		config:      config,
+		connManager: NewConnectionManager(config),
+		done:        make(chan struct{}),
 	}
 }
 
-// 启动消费者（带自动重连）
-func (c *DLXConsumer) Start(ctx context.Context) error {
+// Start 启动消费者（带自动重连）
+func (c *DLXConsumer) Start(ctx context.Context, handler func(msg amqp.Delivery) error) error {
+	c.wg.Add(1)
+	defer c.wg.Done()
+
 	var retries int
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-c.done:
+			return nil
 		default:
-			err := c.connect()
-			if err != nil {
+			// 建立连接和通道
+			if err := c.connect(); err != nil {
 				if retries >= c.config.MaxRetries {
-					return fmt.Errorf("max retries (%d) reached", c.config.MaxRetries)
+					return fmt.Errorf("max retries (%d) reached: %w", c.config.MaxRetries, err)
 				}
 
 				log.Printf("Connection failed, retrying in %v (attempt %d/%d)",
 					c.config.ReconnectDelay, retries+1, c.config.MaxRetries)
 
-				time.Sleep(c.config.ReconnectDelay)
+				select {
+				case <-time.After(c.config.ReconnectDelay):
+				case <-ctx.Done():
+					return nil
+				}
+
 				retries++
 				continue
 			}
 
 			retries = 0 // 重置重试计数器
-			log.Println("Connected to RabbitMQ")
 
-			err = c.consumeDLX()
-			if err != nil {
+			// 开始消费
+			if err := c.consumeDLX(handler); err != nil {
 				log.Printf("Consuming error: %v", err)
-				c.close()
+				c.closeResources()
 				continue
 			}
 
-			// 等待连接关闭或主动终止
+			// 监听连接关闭事件
+			connCloseChan := c.connManager.NotifyClose()
+			channelCloseChan := c.channel.NotifyClose(make(chan *amqp.Error))
+
 			select {
 			case <-c.done:
 				return nil
-			case <-c.connection.NotifyClose(make(chan *amqp.Error)):
-				log.Println("Connection closed, reconnecting...")
+			case <-ctx.Done():
+				return nil
+			case err := <-connCloseChan:
+				log.Printf("Connection closed: %v", err)
+				c.closeResources()
+			case err := <-channelCloseChan:
+				log.Printf("Channel closed: %v", err)
+				c.closeResources()
 			}
 		}
 	}
 }
 
-// 建立连接和通道
+// connect 建立连接和通道
 func (c *DLXConsumer) connect() error {
-	var err error
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	c.connection, err = amqp.DialConfig(c.config.URL, amqp.Config{
-		Dial: amqp.DefaultDial(c.config.PublishTimeout),
-	})
+	// 获取连接
+	conn, err := c.connManager.GetConnection()
 	if err != nil {
-		return fmt.Errorf("failed to dial: %w", err)
+		return fmt.Errorf("failed to get connection: %w", err)
 	}
 
-	c.channel, err = c.connection.Channel()
+	// 创建通道
+	ch, err := conn.Channel()
 	if err != nil {
 		return fmt.Errorf("failed to open channel: %w", err)
 	}
 
-	// 声明DLX队列（确保存在）
-	_, err = c.channel.QueueDeclare(
+	// 声明基础设施
+	if err := declareDLXInfrastructure(ch, c.config); err != nil {
+		_ = ch.Close()
+		return fmt.Errorf("failed to declare infrastructure: %w", err)
+	}
+
+	// 设置QoS
+	if err := ch.Qos(
+		c.config.PrefetchCount,
+		0,     // prefetchSize
+		false, // global
+	); err != nil {
+		_ = ch.Close()
+		return fmt.Errorf("failed to set QoS: %w", err)
+	}
+
+	c.channel = ch
+	return nil
+}
+
+// consumeDLX 开始消费死信队列
+func (c *DLXConsumer) consumeDLX(handler func(msg amqp.Delivery) error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.channel == nil {
+		return errors.New("channel not initialized")
+	}
+
+	msgs, err := c.channel.Consume(
 		c.config.DLXQueueName,
+		"",    // consumer
+		false, // auto-ack
+		false, // exclusive
+		false, // no-local
+		false, // no-wait
+		nil,   // args
+	)
+	if err != nil {
+		return fmt.Errorf("failed to consume: %w", err)
+	}
+
+	// 启动消息处理协程
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for {
+			select {
+			case <-c.done:
+				return
+			case msg, ok := <-msgs:
+				if !ok {
+					log.Println("Message channel closed")
+					return
+				}
+
+				if err := handler(msg); err != nil {
+					log.Printf("Message handling failed: %v", err)
+					_ = msg.Nack(false, true) // 重新入队
+				} else {
+					_ = msg.Ack(false)
+				}
+			}
+		}
+	}()
+
+	log.Println("Started DLX consumer")
+	return nil
+}
+
+// Shutdown 优雅关闭
+func (c *DLXConsumer) Shutdown() {
+	close(c.done)
+	c.closeResources()
+	c.wg.Wait()
+	log.Println("DLX consumer shutdown complete")
+}
+
+// closeResources 关闭资源
+func (c *DLXConsumer) closeResources() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.channel != nil {
+		_ = c.channel.Close()
+		c.channel = nil
+	}
+}
+
+// declareDLXInfrastructure 声明死信队列基础设施
+func declareDLXInfrastructure(ch *amqp.Channel, cfg *config.RabbitMQConfig) error {
+	// 声明DLX交换器
+	if err := ch.ExchangeDeclare(
+		cfg.DLXExchange,
+		"fanout", // 死信通常用fanout广播
+		true,     // durable
+		false,    // autoDelete
+		false,    // internal
+		false,    // noWait
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to declare DLX exchange: %w", err)
+	}
+
+	// 声明DLX队列
+	if _, err := ch.QueueDeclare(
+		cfg.DLXQueueName,
 		true,  // durable
 		false, // autoDelete
 		false, // exclusive
 		false, // noWait
-		nil,   // args
-	)
-	if err != nil {
+		amqp.Table{
+			"x-queue-type": "classic", // 或 "quorum" 用于高可用
+		},
+	); err != nil {
 		return fmt.Errorf("failed to declare DLX queue: %w", err)
 	}
 
-	// 设置QoS
-	err = c.channel.Qos(
-		c.config.PrefetchCount,
-		0,     // prefetchSize
-		false, // global
-	)
-	if err != nil {
-		return fmt.Errorf("failed to set QoS: %w", err)
+	// 绑定DLX队列到交换器
+	if err := ch.QueueBind(
+		cfg.DLXQueueName,
+		"", // fanout不需要routing key
+		cfg.DLXExchange,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to bind DLX queue: %w", err)
 	}
 
 	return nil
-}
-
-// 消费死信队列
-func (c *DLXConsumer) consumeDLX() error {
-	msgs, err := c.channel.Consume(
-		c.config.DLXQueueName,
-		"",    // consumer
-		false, // autoAck
-		false, // exclusive
-		false, // noLocal
-		false, // noWait
-		nil,   // args
-	)
-	if err != nil {
-		return fmt.Errorf("failed to consume DLX queue: %w", err)
-	}
-
-	log.Printf("Started consuming DLX queue: %s", c.config.DLXQueueName)
-
-	for {
-		select {
-		case <-c.done:
-			return nil
-		case msg, ok := <-msgs:
-			if !ok {
-				return fmt.Errorf("message channel closed")
-			}
-
-			// 处理死信消息
-			if err := c.handleMessage(msg); err != nil {
-				log.Printf("Failed to handle message: %v", err)
-				// 可以选择将消息转移到其他队列或记录日志
-				_ = msg.Nack(false, false) // 不重试
-			} else {
-				_ = msg.Ack(false)
-			}
-		}
-	}
-}
-
-// 处理消息（示例实现）
-func (c *DLXConsumer) handleMessage(msg amqp.Delivery) error {
-	// 这里实现你的业务逻辑
-	log.Printf("Received dead letter message: %s", msg.Body)
-
-	// 示例：检查重试次数
-	headers := msg.Headers
-	retryCount, _ := headers["x-retry-count"].(int32)
-	if retryCount > int32(c.config.MaxRetries) {
-		log.Printf("Message exceeded max retries: %d", retryCount)
-		return fmt.Errorf("max retries exceeded")
-	}
-
-	// TODO: 添加你的处理逻辑
-
-	return nil
-}
-
-// 关闭连接
-func (c *DLXConsumer) close() {
-	if c.channel != nil {
-		_ = c.channel.Close()
-	}
-	if c.connection != nil {
-		_ = c.connection.Close()
-	}
-	close(c.done)
-}
-
-// 优雅关闭
-func (c *DLXConsumer) Shutdown() {
-	c.close()
-	log.Println("DLX consumer stopped")
 }

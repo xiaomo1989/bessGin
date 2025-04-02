@@ -17,6 +17,8 @@ type RabbitMQConfig struct {
 	ReconnectDelay time.Duration `json:"reconnect_delay"`
 	MaxRetries     int           `json:"max_retries"`
 	PublishTimeout time.Duration `json:"publish_timeout"`
+	Heartbeat      time.Duration `json:"heartbeat"`
+	ConnectTimeout time.Duration `json:"connect_timeout"`
 }
 
 func Load() *RabbitMQConfig {
@@ -31,6 +33,8 @@ func Load() *RabbitMQConfig {
 		ReconnectDelay: getEnvDuration("RABBITMQ_RECONNECT_DELAY", 5*time.Second),
 		MaxRetries:     getEnvInt("RABBITMQ_MAX_RETRIES", 3),
 		PublishTimeout: getEnvDuration("RABBITMQ_PUBLISH_TIMEOUT", 10*time.Second),
+		Heartbeat:      getEnvDuration("RABBITMQ_PUBLISH_TIMEOUT", 10*time.Second),
+		ConnectTimeout: getEnvDuration("RABBITMQ_PUBLISH_TIMEOUT", 10*time.Second),
 	}
 }
 
